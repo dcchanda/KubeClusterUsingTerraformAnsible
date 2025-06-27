@@ -4,9 +4,9 @@ metadata:
   name: kube-cluster-creator
   description: Creates a Kubernetes cluster using Terraform + Ansible via GitHub Actions
   annotations:
-    github.com/project-slug: dcchana/KubeClusterUsingTerraformAnsible
+    github.com/project-slug: dcchanda/KubeClusterUsingTerraformAnsible
     backstage.io/techdocs-ref: dir:.
-    #github.com/actions: dcchana/KubeClusterUsingTerraformAnsible
+    #github.com/actions: dcchanda/KubeClusterUsingTerraformAnsible
   tags:
     - terraform
     - ansible
