@@ -1,0 +1,119 @@
+name: Terraform and Ansible Cluster Setup
+
+on: 
+  workflow_dispatch:
+
+jobs:
+  terraform-apply:
+    name: Provision EC2 Instances with Terraform
+    runs-on: ubuntu-latest
+
+    steps:
+      # Checkout the repository
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # Set up Terraform
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.7
+         
+      # Terraform init and apply
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Apply
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: terraform apply -auto-approve
+
+      - name: Set Terraform Output to Environment
+        run: |
+          echo "masterp_ip=$(terraform output -raw masterp_ip)" > variables.txt
+          echo "master_ip=$(terraform output -raw master_ip)" >> variables.txt
+          echo "worker1_ip=$(terraform output -raw worker1_ip)" >> variables.txt
+          echo "worker2_ip=$(terraform output -raw worker2_ip)" >> variables.txt
+      
+      - name: Upload variables file
+        uses: actions/upload-artifact@v4
+        with:
+          name: variables
+          path: variables.txt
+  
+  ansible-configure:  
+    needs: terraform-apply
+    runs-on: ubuntu-latest
+    steps:  
+      - name: Checkout Code
+        uses: actions/checkout@v4
+      # Install Ansible
+      
+      - name: Download variables file
+        uses: actions/download-artifact@v4
+        with:
+          name: variables
+      
+      - name: Install Ansible
+        run: sudo apt-get update && sudo apt-get install -y ansible
+        
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+      
+      - name: Configure Ansible Inventory
+        run: |
+          source variables.txt
+          echo "[master]" > inventory
+          echo "master-node ansible_host=${master_ip} ansible_user=ubuntu ansible_ssh_private_key_file=~/.ssh/id_rsa" >> inventory
+
+          echo "[workers]" >> inventory
+          echo "worker1 ansible_host=${worker1_ip} ansible_user=ubuntu ansible_ssh_private_key_file=~/.ssh/id_rsa" >> inventory
+          echo "worker2 ansible_host=${worker2_ip} ansible_user=ubuntu ansible_ssh_private_key_file=~/.ssh/id_rsa" >> inventory
+
+          echo "[all:vars]" >> inventory
+          echo "ansible_python_interpreter=/usr/bin/python3" >> inventory
+
+      - name: Add remote host key to known hosts
+        run: |
+          source variables.txt
+          ssh-keyscan -H ${master_ip} >> ~/.ssh/known_hosts
+          ssh-keyscan -H ${worker1_ip} >> ~/.ssh/known_hosts
+          ssh-keyscan -H ${worker2_ip} >> ~/.ssh/known_hosts      
+      # Run Ansible Playbooks to Install Kubernetes and Docker
+      - name: Run Base Setup Playbook
+        run: ansible-playbook -i inventory basesetup.yaml
+
+      - name: Install cri-dockerd
+        run: ansible-playbook -i inventory installcrid.yaml
+      
+      - name: Create J2 template file
+        run: |
+          source variables.txt
+          mkdir -p /home/runner/work/KubeClusterUsingTerraformAnsible/KubeClusterUsingTerraformAnsible/templates
+          echo "
+          apiVersion: kubeadm.k8s.io/v1beta3
+          kind: InitConfiguration
+          localAPIEndpoint:
+            advertiseAddress: ${masterp_ip}  # Dynamically set the master node IP address
+            bindPort: 6443
+          nodeRegistration:
+            criSocket: unix:///var/run/cri-dockerd.sock
+          ---
+          apiVersion: kubeadm.k8s.io/v1beta3
+          kind: ClusterConfiguration
+          networking:
+            podSubnet: 192.168.0.3/16
+          " > /home/runner/work/KubeClusterUsingTerraformAnsible/KubeClusterUsingTerraformAnsible/masterip.yaml.j2      
+      
+      - name: Initialize Master Node
+        run: ansible-playbook -i inventory kubemasterinit.yaml
+        
+      - name: Join Worker Nodes
+        run: ansible-playbook -i inventory workerjoin.yaml
+        
+      - name: Install Calico Networking
+        run: ansible-playbook -i inventory calicoinstall.yaml
