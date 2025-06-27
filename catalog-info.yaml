@@ -6,7 +6,7 @@ metadata:
   annotations:
     github.com/project-slug: dcchana/KubeClusterUsingTerraformAnsible
     backstage.io/techdocs-ref: dir:.
-    github.com/actions: dcchana/KubeClusterUsingTerraformAnsible
+    #github.com/actions: dcchana/KubeClusterUsingTerraformAnsible
   tags:
     - terraform
     - ansible
